@@ -19,6 +19,15 @@
     <Routes />
     <ReconnectModal />
     <script src="@Assets["_framework/blazor.web.js"]"></script>
+    <script>
+        window.ponkodock = {
+            scrollToBottom: function () {
+                const logWindow = document.getElementById('logWindow');
+                if (!logWindow) return;
+                logWindow.scrollTop = logWindow.scrollHeight;
+            }
+        };
+    </script>
 </body>
 
 </html>

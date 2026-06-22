@@ -1,12 +1,16 @@
 ﻿@page "/"
+@using Microsoft.AspNetCore.Mvc
+@attribute [IgnoreAntiforgeryToken]
 @using System.Text.Json
+@using PonkoDockApp.Services
 @rendermode InteractiveServer
 @inject IDockerService DockerService
+@inject IJSRuntime JS
 
 <div class="app-container">
 <div class="top-bar">
     <div class="d-flex align-items-center gap-2">
-        <img src="@Assets["android-chrome-192x192.png"]" alt="Logo" style="width: 32px; height: 32px;" />
+        <img src="@Assets["favicon-192x192.png"]" alt="Logo" style="width: 32px; height: 32px;" />
         <h1 class="text-center">PonkoDock</h1>
     </div>
 </div>
@@ -93,7 +97,7 @@
                     </div>
                 </div>
                 <div class="logs-content" id="logWindow">
-                    @foreach (var log in logEntries)
+                    @foreach (var log in logEntries.ToList())
                     {
                         <div class="log-entry @(log.IsError ? "log-error" : "")">@log.Text</div>
                     }
@@ -132,11 +136,6 @@
     private bool isListeningToLogs;
     private CancellationTokenSource? cts;
 
-    private class LogEntry {
-        public string? Text { get; init; }
-        public bool IsError { get; init; }
-    }
-
     protected override async Task OnInitializedAsync()
     {
         await LoadContainers();
@@ -145,6 +144,12 @@
     private async Task LoadContainers()
     {
         containers = await DockerService.ListContainersAsync();
+        if (containers != null && containers.Any() && selectedContainerId == null)
+        {
+            var first = containers.First();
+            selectedContainerId = first.ID;
+            selectedContainer = first;
+        }
     }
 
     private Task SelectContainer(string? id)
@@ -218,27 +223,33 @@
     {
         if (selectedContainer == null) return;
         
+        if (isListeningToLogs) return;
+
+        logEntries.Clear();
+
         isListeningToLogs = true;
         cts = new CancellationTokenSource();
         
         try
         {
-            await DockerService.StreamLogsAsync(selectedContainer.ID, async line =>
+            await foreach (var log in DockerService.GetContainerLogsAsync(selectedContainer.ID, cts.Token))
             {
-                var isError = line.StartsWith("[ERR]");
-                logEntries.Add(new LogEntry { Text = line, IsError = isError });
-                
+                logEntries.Add(log);
                 if (logEntries.Count > 1000)
                 {
                     logEntries.RemoveAt(0);
                 }
-                
-                await InvokeAsync(StateHasChanged);
-            }, cts.Token);
+                await InvokeAsync(async () => 
+                {
+                    StateHasChanged();
+                    await JS.InvokeVoidAsync("ponkodock.scrollToBottom");
+                });
+            }
         }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            logEntries.Add(new LogEntry { Text = $"[Error streaming logs: {ex.Message}]", IsError = true });
+            logEntries.Add(new LogEntry($"[Error streaming logs: {ex.Message}]", true));
             await InvokeAsync(StateHasChanged);
         }
         finally

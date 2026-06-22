@@ -4,6 +4,8 @@ WORKDIR /app
 EXPOSE 8080
 EXPOSE 8081
 ENV ASPNETCORE_HTTP_PORTS=8080
+ENV DOTNET_ENVIRONMENT=Production
+ENV Docker__Uri=unix:///var/run/docker.sock
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src

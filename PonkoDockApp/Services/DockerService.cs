@@ -1,3 +1,4 @@
+using System.Threading.Channels;
 using System.Text;
 using Docker.DotNet;
 using Docker.DotNet.Models;
@@ -87,8 +88,10 @@ namespace PonkoDockApp.Services
             return await client.Containers.InspectContainerAsync(id);
         }
 
-        public async Task StreamLogsAsync(string id, Func<string, Task> onLogReceived, CancellationToken ct)
+        public async IAsyncEnumerable<LogEntry> GetContainerLogsAsync(string id, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
         {
+            var channel = Channel.CreateUnbounded<LogEntry>();
+            
             var stream = await client.Containers.GetContainerLogsAsync(id, true, new ContainerLogsParameters
             {
                 ShowStdout = true,
@@ -96,28 +99,38 @@ namespace PonkoDockApp.Services
                 Follow = true
             }, ct);
 
-            try
+            _ = Task.Run(async () =>
             {
-                await stream.CopyOutputToAsync(
-                    Stream.Null,
-                    new CallbackStream(onLogReceived, ""),
-                    new CallbackStream(onLogReceived, "[ERR] "),
-                    ct
-                );
-            }
-            catch (OperationCanceledException) { }
-            finally
+                try
+                {
+                    await stream.CopyOutputToAsync(
+                        Stream.Null,
+                        new CallbackStream(channel.Writer, ""),
+                        new CallbackStream(channel.Writer, "[ERR] "),
+                        ct
+                    );
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception ex) { Console.WriteLine($"Log stream error: {ex.Message}"); }
+                finally
+                {
+                    stream.Dispose();
+                    channel.Writer.Complete();
+                }
+            }, ct);
+
+            await foreach (var log in channel.Reader.ReadAllAsync(ct))
             {
-                stream.Dispose();
+                yield return log;
             }
         }
 
-        private class CallbackStream(Func<string, Task> onLog, string prefix) : Stream
+        private class CallbackStream(ChannelWriter<LogEntry> writer, string prefix) : Stream
         {
             public override void Write(byte[] buffer, int offset, int count)
             {
                 var message = Encoding.UTF8.GetString(buffer, offset, count);
-                _ = onLog(prefix + message);
+                _ = writer.WriteAsync(new LogEntry(prefix + message, prefix == "[ERR] "));
             }
 
             public override bool CanRead => false;

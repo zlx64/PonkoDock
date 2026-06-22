@@ -11,5 +11,7 @@ public interface IDockerService
     Task RecreateContainerAsync(string id);
     Task PullImageAsync(string image);
     Task<ContainerInspectResponse> InspectContainerAsync(string id);
-    Task StreamLogsAsync(string id, Func<string, Task> onLogReceived, CancellationToken ct);
+    IAsyncEnumerable<LogEntry> GetContainerLogsAsync(string id, CancellationToken ct);
 }
+
+public record LogEntry(string Text, bool IsError);

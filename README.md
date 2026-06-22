@@ -18,7 +18,6 @@ The easiest way to run PonkoDock is using the official image hosted on GitHub Co
 docker run -d \
   -p 8080:8080 \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -e Docker__Uri=unix:///var/run/docker.sock \
   --name ponkodock \
   ghcr.io/zlx64/ponkodock:latest
 ```
@@ -37,9 +36,6 @@ services:
       - "8080:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      - DOTNET_ENVIRONMENT=Production
-      - Docker__Uri=unix:///var/run/docker.sock
 ```
 
 Then run:
