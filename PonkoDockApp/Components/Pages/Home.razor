@@ -1,0 +1,290 @@
+﻿@page "/"
+@rendermode InteractiveServer
+@inject IDockerService DockerService
+@using System.Threading
+@using Docker.DotNet.Models
+
+<div class="app-container">
+<div class="top-bar">
+    <div class="d-flex align-items-center gap-2">
+        <img src="android-chrome-192x192.png" alt="Logo" style="width: 32px; height: 32px;" />
+        <h1 class="text-center">PonkoDock</h1>
+    </div>
+</div>
+
+    <div class="main-layout">
+        <div class="sidebar">
+            <div class="container-list">
+                @if (containers == null)
+                {
+                    <div class="p-3 text-center"><div class="spinner-border spinner-border-sm text-primary"></div></div>
+                }
+                else if (!containers.Any())
+                {
+                    <div class="p-3 text-muted text-center">No containers found.</div>
+                }
+                else
+                {
+                    @foreach (var container in containers)
+                    {
+                        <div class="container-item @(selectedContainerId == container.ID ? "active" : "")" 
+                             @onclick="() => SelectContainer(container.ID)">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <strong class="text-truncate" style="max-width: 180px;">@(container.Names?.FirstOrDefault()?.TrimStart('/') ?? "Unknown")</strong>
+                                <span class="badge @(container.State == "running" ? "bg-success" : "bg-secondary")" style="font-size: 0.7rem;">@container.State</span>
+                            </div>
+                            <small class="d-block text-truncate" style="opacity: 0.8;">@container.Image</small>
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+
+        <div class="content-area">
+            @if (selectedContainer == null)
+            {
+                <div class="controls-section d-flex align-items-center justify-content-center h-100 text-muted">
+                    Select a container from the sidebar to view details and logs.
+                </div>
+                <div class="logs-section d-flex align-items-center justify-content-center h-100 text-muted" style="background: #252526; color: #858585;">
+                    Logs will appear here.
+                </div>
+            }
+            else
+            {
+                <div class="controls-section">
+                    <div class="row g-3 align-items-center">
+<div class="col-md-4">
+    <h5 class="mb-1">@(selectedContainer.Names?.FirstOrDefault()?.TrimStart('/') ?? "Unknown")</h5>
+    <small class="text-muted d-block">ID: @selectedContainer.ID.Substring(0, 12)</small>
+    <small class="text-muted d-block">Image: @selectedContainer.Image</small>
+    <small class="text-muted d-block">Ports: @GetPorts(selectedContainer)</small>
+</div>
+
+                        <div class="col-md-8 text-end">
+                            <div class="d-flex gap-2 justify-content-end">
+                                <button class="btn btn-sm btn-outline-success" @onclick="() => Start(selectedContainer.ID)">
+                                    <i class="bi bi-play-fill me-1"></i>Start
+                                </button>
+                                <button class="btn btn-sm btn-outline-warning" @onclick="() => Stop(selectedContainer.ID)">
+                                    <i class="bi bi-stop-fill me-1"></i>Stop
+                                </button>
+                                <button class="btn btn-sm btn-outline-info" @onclick="() => Restart(selectedContainer.ID)">
+                                    <i class="bi bi-arrow-clockwise me-1"></i>Restart
+                                </button>
+                                <button class="btn btn-sm btn-outline-primary" @onclick="() => Update(selectedContainer.ID, selectedContainer.Image)">
+                                    <i class="bi bi-cloud-download me-1"></i>Update
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => Recreate(selectedContainer.ID)">
+                                    <i class="bi bi-arrows-rotate me-1"></i>Recreate
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="ViewInfo">
+                                    <i class="bi bi-info-circle me-1"></i>Info
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="logs-section">
+                    <div class="logs-header">
+                        <span>Runtime Logs</span>
+                        <div class="d-flex gap-2">
+                            @if (!isListeningToLogs)
+                            {
+                                <button class="btn btn-sm btn-primary" @onclick="StartListening">
+                                    <i class="bi bi-play-circle me-1"></i>Start Listening
+                                </button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-sm btn-danger" @onclick="StopListening">
+                                    <i class="bi bi-stop-circle me-1"></i>Stop Listening
+                                </button>
+                            }
+                            <button class="btn btn-sm btn-outline-light" @onclick="ClearLogs">
+                                <i class="bi bi-trash3 me-1"></i>Clear
+                                </button>
+                        </div>
+                    </div>
+                    <div class="logs-content" id="logWindow">
+                        @foreach (var log in logEntries)
+                        {
+                            <div class="log-entry @(log.IsError ? "log-error" : "")">@log.Text</div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@if (showInfoModal)
+{
+    <div class="modal show d-block" style="background: rgba(0,0,0,0.5)">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Container Info</h5>
+                    <button type="button" class="btn-close" @onclick="() => showInfoModal = false"></button>
+                </div>
+                <div class="modal-body bg-light">
+                    <pre style="font-size: 0.85rem; overflow: auto; max-height: 70vh;">@containerInfo</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<ContainerListResponse> containers;
+    private ContainerListResponse selectedContainer;
+    private string selectedContainerId;
+    
+    private bool showInfoModal = false;
+    private string containerInfo;
+    
+    private List<LogEntry> logEntries = new();
+    private bool isListeningToLogs = false;
+    private CancellationTokenSource cts;
+
+    private class LogEntry {
+        public string Text { get; set; }
+        public bool IsError { get; set; }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadContainers();
+    }
+
+    private async Task LoadContainers()
+    {
+        containers = await DockerService.ListContainersAsync();
+    }
+
+    private async Task SelectContainer(string id)
+    {
+        selectedContainerId = id;
+        selectedContainer = containers?.FirstOrDefault(c => c.ID == id);
+        StopListening();
+        logEntries.Clear();
+        StateHasChanged();
+    }
+
+    private async Task Start(string id)
+    {
+        await DockerService.StartContainerAsync(id);
+        await LoadContainers();
+        if (selectedContainer != null) selectedContainer = containers?.FirstOrDefault(c => c.ID == id);
+    }
+
+    private async Task Stop(string id)
+    {
+        await DockerService.StopContainerAsync(id);
+        await LoadContainers();
+        if (selectedContainer != null) selectedContainer = containers?.FirstOrDefault(c => c.ID == id);
+    }
+
+    private async Task Restart(string id)
+    {
+        await DockerService.RestartContainerAsync(id);
+        await LoadContainers();
+        if (selectedContainer != null) selectedContainer = containers?.FirstOrDefault(c => c.ID == id);
+    }
+
+    private async Task Update(string id, string image)
+    {
+        try
+        {
+            await DockerService.PullImageAsync(image);
+            await DockerService.RecreateContainerAsync(id);
+            await LoadContainers();
+            if (selectedContainer != null) selectedContainer = containers?.FirstOrDefault(c => c.ID == id);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(ex.Message);
+        }
+    }
+
+    private async Task Recreate(string id)
+    {
+        await DockerService.RecreateContainerAsync(id);
+        await LoadContainers();
+        if (selectedContainer != null) selectedContainer = containers?.FirstOrDefault(c => c.ID == id);
+    }
+
+    private async Task ViewInfo()
+    {
+        if (selectedContainer == null) return;
+        var info = await DockerService.InspectContainerAsync(selectedContainer.ID);
+        containerInfo = System.Text.Json.JsonSerializer.Serialize(info, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        showInfoModal = true;
+    }
+
+    private async Task StartListening()
+    {
+        if (selectedContainer == null) return;
+        
+        isListeningToLogs = true;
+        cts = new CancellationTokenSource();
+        
+        try
+        {
+            await DockerService.StreamLogsAsync(selectedContainer.ID, async (line) =>
+            {
+                bool isError = line.StartsWith("[ERR]");
+                logEntries.Add(new LogEntry { Text = line, IsError = isError });
+                
+                if (logEntries.Count > 1000)
+                {
+                    logEntries.RemoveAt(0);
+                }
+                
+                await InvokeAsync(StateHasChanged);
+            }, cts.Token);
+        }
+        catch (Exception ex)
+        {
+            logEntries.Add(new LogEntry { Text = $"[Error streaming logs: {ex.Message}]", IsError = true });
+            await InvokeAsync(StateHasChanged);
+        }
+        finally
+        {
+            isListeningToLogs = false;
+        }
+    }
+
+    private void StopListening()
+    {
+        cts?.Cancel();
+        cts = null;
+        isListeningToLogs = false;
+    }
+
+    private void ClearLogs()
+    {
+        logEntries.Clear();
+    }
+
+    private string GetPorts(ContainerListResponse container)
+    {
+        try
+        {
+            var ports = container.Ports;
+            if (ports == null || !ports.Any()) return "None";
+            
+            var portList = new List<string>();
+            foreach (var p in ports)
+            {
+                portList.Add($"{p.PublicPort}:{p.PrivatePort}");
+            }
+            return string.Join(", ", portList);
+        }
+        catch
+        {
+            return "None";
+        }
+    }
+}

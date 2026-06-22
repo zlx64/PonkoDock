@@ -1,0 +1,12 @@
+services:
+  ponkodock:
+    build:
+      context: .
+      dockerfile: PonkoDockApp/Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - DOTNET_ENVIRONMENT=Production
+      - Docker__Uri=unix:///var/run/docker.sock

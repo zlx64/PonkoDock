@@ -40,6 +40,9 @@ ScaffoldingReadMe.txt
 .env
 
 # Others
+.vscode/
+.idea/
+.vs/
 ~$*
 *~
 CodeCoverage/
