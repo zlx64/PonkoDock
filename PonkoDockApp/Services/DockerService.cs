@@ -118,8 +118,8 @@ namespace PonkoDockApp.Services
                 {
                     await stream.CopyOutputToAsync(
                         Stream.Null,
-                        new CallbackStream(channel.Writer, ""),
-                        new CallbackStream(channel.Writer, "[ERR] "),
+                        new CallbackStream(channel.Writer, "", false),
+                        new CallbackStream(channel.Writer, "", true),
                         ct
                     );
                 }
@@ -138,12 +138,12 @@ namespace PonkoDockApp.Services
             }
         }
 
-        private class CallbackStream(ChannelWriter<LogEntry> writer, string prefix) : Stream
+        private class CallbackStream(ChannelWriter<LogEntry> writer, string prefix, bool isError) : Stream
         {
             public override void Write(byte[] buffer, int offset, int count)
             {
                 var message = Encoding.UTF8.GetString(buffer, offset, count);
-                _ = writer.WriteAsync(new LogEntry(prefix + message, prefix == "[ERR] "));
+                _ = writer.WriteAsync(new LogEntry(prefix + message, isError));
             }
 
             public override bool CanRead => false;
