@@ -1,6 +1,5 @@
 ﻿@page "/"
 @using Microsoft.AspNetCore.Mvc
-@attribute [IgnoreAntiforgeryToken]
 @using System.Text.Json
 @using PonkoDockApp.Services
 @rendermode InteractiveServer
@@ -16,28 +15,31 @@
 </div>
 
     <div class="main-layout">
-        <div class="sidebar">
-            <div class="container-list">
-                @if (!(containers?.Any() ?? false))
-                {
-                    <div class="p-3 text-muted text-center">No containers found.</div>
-                }
-                else
-                {
-                    foreach (var container in containers)
-                    {
-                        <div class="container-item @(selectedContainerId == container.ID ? "active" : "")" 
-                             @onclick="() => SelectContainer(container.ID)">
-                            <div class="d-flex justify-content-between align-items-center">
-                                <strong class="text-truncate" style="max-width: 180px;">@(container.Names?.FirstOrDefault()?.TrimStart('/') ?? "Unknown")</strong>
-                                <span class="badge @(container.State == "running" ? "bg-success" : "bg-secondary")" style="font-size: 0.7rem;">@container.State</span>
-                            </div>
-                            <small class="d-block text-truncate" style="opacity: 0.8;">@container.Image</small>
-                        </div>
-                    }
-                }
-            </div>
+    <div class="sidebar">
+        <div class="p-2">
+            <input type="text" class="form-control form-control-sm" placeholder="Filter containers..." @bind="filterText" @bind:event="oninput" style="box-shadow: none; outline: none;" />
         </div>
+        <div class="container-list">
+            @if (!(FilteredContainers?.Any() ?? false))
+            {
+                <div class="p-3 text-muted text-center">No containers found.</div>
+            }
+            else
+            {
+                foreach (var container in FilteredContainers!)
+                {
+                    <div class="container-item @(selectedContainerId == container.ID ? "active" : "")" 
+                         @onclick="() => SelectContainer(container.ID)">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <strong class="text-truncate" style="max-width: 180px;">@(container.Names?.FirstOrDefault()?.TrimStart('/') ?? "Unknown")</strong>
+                            <span class="badge @(container.State == "running" ? "bg-success" : "bg-secondary")" style="font-size: 0.7rem;">@container.State</span>
+                        </div>
+                        <small class="d-block text-truncate" style="opacity: 0.8;">@container.Image</small>
+                    </div>
+                }
+            }
+        </div>
+    </div>
 
         <div class="content-area">
             
@@ -109,15 +111,15 @@
 
 @if (showInfoModal)
 {
-    <div class="modal show d-block" style="background: rgba(0,0,0,0.5)">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
+    <div class="modal show d-block" style="background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; height: 100vh;">
+        <div id="infoModalDialog" class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable" style="height: 80vh; width: 60vw; max-width: 80vw; position: relative;">
+            <div class="modal-content" style="height: 100%; resize: both; overflow: hidden;">
                 <div class="modal-header">
                     <h5 class="modal-title">Container Info</h5>
                     <button type="button" class="btn-close" @onclick="() => showInfoModal = false"></button>
                 </div>
-                <div class="modal-body bg-light">
-                    <pre style="font-size: 0.85rem; overflow: auto; max-height: 70vh;">@containerInfo</pre>
+                <div class="modal-body bg-light p-0">
+                    <code class="language-json" style="display: block; white-space: pre-wrap; word-break: break-all; font-size: 0.85rem; margin-bottom: 0; padding: 0 10px;">@containerInfo</code>
                 </div>
             </div>
         </div>
@@ -126,11 +128,19 @@
 
 @code {
     private List<ContainerListResponse>? containers;
+    private string filterText = "";
     private ContainerListResponse? selectedContainer;
     private string? selectedContainerId;
     
+    private IEnumerable<ContainerListResponse> FilteredContainers => 
+        containers?.Where(c => 
+            string.IsNullOrEmpty(filterText) || 
+            (c.Names?.FirstOrDefault()?.TrimStart('/') ?? "").Contains(filterText, StringComparison.OrdinalIgnoreCase)
+        ).OrderBy(c => c.Names?.FirstOrDefault()?.TrimStart('/') ?? "").ToList() ?? new List<ContainerListResponse>();
+
     private bool showInfoModal;
     private string? containerInfo;
+    private bool _shouldHighlight;
     
     private readonly List<LogEntry> logEntries = new();
     private bool isListeningToLogs;
@@ -139,6 +149,15 @@
     protected override async Task OnInitializedAsync()
     {
         await LoadContainers();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_shouldHighlight)
+        {
+            _shouldHighlight = false;
+            await JS.InvokeVoidAsync("ponkodock.highlightAll");
+        }
     }
 
     private async Task LoadContainers()
@@ -217,6 +236,8 @@
         var info = await DockerService.InspectContainerAsync(selectedContainer.ID);
         containerInfo = JsonSerializer.Serialize(info, new JsonSerializerOptions { WriteIndented = true });
         showInfoModal = true;
+        _shouldHighlight = true;
+        await JS.InvokeVoidAsync("ponkodock.makeDraggable", "infoModalDialog");
     }
 
     private async Task StartListening()
