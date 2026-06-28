@@ -66,20 +66,50 @@ namespace PonkoDockApp.Services
         {
             logger.LogInformation("Recreating container {Id}", id);
             var inspect = await InspectContainerAsync(id);
-            dynamic inspectDyn = inspect;
-            var name = inspectDyn.Name;
-            var image = inspectDyn.Image;
-        
+            
             await StopContainerAsync(id);
             await RemoveContainerAsync(id);
-        
+
             var createParams = new CreateContainerParameters
             {
-                Image = image,
-                Name = name.TrimStart('/'),
+                Image = inspect.Image,
+                Name = inspect.Name.TrimStart('/'),
+                Env = inspect.Config.Env,
+                Entrypoint = inspect.Config.Entrypoint,
+                Cmd = inspect.Config.Cmd,
+                Labels = inspect.Config.Labels,
+                WorkingDir = inspect.Config.WorkingDir,
+                User = inspect.Config.User,
+                ExposedPorts = inspect.Config.ExposedPorts,
+                StopSignal = inspect.Config.StopSignal,
+                Tty = inspect.Config.Tty,
+                OpenStdin = inspect.Config.OpenStdin,
+                HostConfig = new HostConfig
+                {
+                    Binds = inspect.HostConfig.Binds,
+                    PortBindings = inspect.HostConfig.PortBindings,
+                    RestartPolicy = inspect.HostConfig.RestartPolicy,
+                    Memory = inspect.HostConfig.Memory,
+                    CapAdd = inspect.HostConfig.CapAdd,
+                    CapDrop = inspect.HostConfig.CapDrop,
+                    SecurityOpt = inspect.HostConfig.SecurityOpt,
+                    NetworkMode = inspect.HostConfig.NetworkMode,
+                }
             };
-        
+
             var response = await client.Containers.CreateContainerAsync(createParams);
+
+            if (inspect.NetworkSettings.Networks != null)
+            {
+                foreach (var network in inspect.NetworkSettings.Networks)
+                {
+                    await client.Networks.ConnectNetworkAsync(network.Key, new NetworkConnectParameters
+                    {
+                        Container = response.ID
+                    });
+                }
+            }
+
             await StartContainerAsync(response.ID);
         }
         
